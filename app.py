@@ -1,37 +1,46 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi.responses import StreamingResponse
 import pandas as pd
 import io
-import re
+import os
 
 app = FastAPI()
 
 @app.get("/")
 def read_root():
-    return {"status": "API is running"}
+    return {"message": "CSV Processor API is running. Use /process-csv-to-csv to upload files."}
 
-@app.post("/process-csv")
-async def process_csv(file: UploadFile = File(...)):
-    contents = await file.read()
-    
-    # ลองอ่านด้วย UTF-8 ถ้าไม่ได้ให้ลอง Windows-874 (Thai)
+@app.post("/process-csv-to-csv")
+async def process_csv_to_csv(file: UploadFile = File(...)):
+    # 1. อ่านข้อมูลจากไฟล์ที่ส่งมา
     try:
-        df = pd.read_csv(io.BytesIO(contents), skiprows=0, header=None, encoding='utf-8')
-    except:
-        df = pd.read_csv(io.BytesIO(contents), skiprows=0, header=None, encoding='cp874')
+        contents = await file.read()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Cannot read file: {str(e)}")
 
-    result = []
-    # ... (Logic เดิมของคุณ)
-    
-    for index, row in df.iterrows():
-        # แปลงข้อมูลในแต่ละแถวเป็น List ของ String
-        cols = [str(val).strip() for val in row.values]
+    # 2. ตรวจสอบและอ่านไฟล์ด้วย Encoding ที่เหมาะสมกับภาษาไทย
+    try:
+        # ลอง UTF-8 ก่อน
+        df_raw = pd.read_csv(io.BytesIO(contents), header=None, encoding='utf-8')
+    except:
+        try:
+            # ถ้าไม่ได้ให้ใช้ Windows-874 (ภาษาไทย)
+            df_raw = pd.read_csv(io.BytesIO(contents), header=None, encoding='cp874')
+        except Exception as e:
+            raise HTTPException(status_code=422, detail="Unsupported encoding. Please use UTF-8 or CP874.")
+
+    processed_data = []
+
+    # 3. วนลูปจัดการข้อมูลตามโครงสร้างที่ต้องการ
+    for _, row in df_raw.iterrows():
+        # ลบช่องว่างส่วนเกินในแต่ละช่อง
+        cols = [str(val).strip() if pd.notna(val) else "" for val in row.values]
         
-        # เงื่อนไข: คอลัมน์ที่ 2 (index 1) ต้องเป็นตัวเลขลำดับ
-        # และมีความยาวคอลัมน์ที่เหมาะสม
+        # คัดกรองเฉพาะแถวที่มีเลขลำดับในคอลัมน์ที่ 2 (index 1)
         row_id = cols[1] if len(cols) > 1 else ""
         
         if row_id.isdigit():
-            data = {
+            processed_data.append({
                 "ลำดับ": row_id,
                 "วันที่รับเข้า": cols[2] if len(cols) > 2 else "",
                 "รายการสินค้า": cols[3] if len(cols) > 3 else "",
@@ -45,14 +54,32 @@ async def process_csv(file: UploadFile = File(...)):
                 "ประเภท": cols[11] if len(cols) > 11 else "",
                 "มีเล่ม": cols[12] if len(cols) > 12 else "",
                 "ราคา": cols[14] if len(cols) > 14 else ""
-            }
-            result.append(data)
+            })
 
-    return {"count": len(result), "data": result}
+    if not processed_data:
+        raise HTTPException(status_code=404, detail="No valid data rows found in the CSV.")
+
+    # 4. สร้าง DataFrame ใหม่และแปลงกลับเป็น CSV Stream
+    df_result = pd.DataFrame(processed_data)
+    
+    # ใช้ utf-8-sig เพื่อให้ Excel เปิดภาษาไทยได้ถูกต้อง
+    stream = io.StringIO()
+    df_result.to_csv(stream, index=False, encoding='utf-8-sig')
+    
+    # เตรียมข้อมูลส่งกลับ
+    response_bytes = io.BytesIO(stream.getvalue().encode('utf-8-sig'))
+    response_bytes.seek(0)
+
+    return StreamingResponse(
+        response_bytes,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": "attachment; filename=cleaned_inventory.csv"
+        }
+    )
 
 if __name__ == "__main__":
     import uvicorn
-    import os
-    # พยายามดึงค่า PORT จากระบบ ถ้าไม่มีให้ใช้ 8080
+    # ดึงค่า PORT จาก Railway environment
     port = int(os.environ.get("PORT", 8080))
     uvicorn.run(app, host="0.0.0.0", port=port)
