@@ -7,5 +7,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Railway จะส่ง PORT มาให้ทาง Environment Variable
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+# สั่งให้รันที่ Port 8080 โดยตรงตามที่ Railway ชี้มา
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]
