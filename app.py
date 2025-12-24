@@ -11,14 +11,16 @@ def read_root():
 
 @app.post("/process-csv")
 async def process_csv(file: UploadFile = File(...)):
-    # 1. อ่านไฟล์ที่ส่งมา
     contents = await file.read()
     
-    # 2. แปลงข้อความและจัดการบรรทัดที่ไม่เกี่ยวข้อง
-    # ใช้ engine='python' เพื่อให้รองรับไฟล์ที่โครงสร้างไม่สมบูรณ์ได้ดีขึ้น
-    df = pd.read_csv(io.BytesIO(contents), skiprows=0, header=None)
+    # ลองอ่านด้วย UTF-8 ถ้าไม่ได้ให้ลอง Windows-874 (Thai)
+    try:
+        df = pd.read_csv(io.BytesIO(contents), skiprows=0, header=None, encoding='utf-8')
+    except:
+        df = pd.read_csv(io.BytesIO(contents), skiprows=0, header=None, encoding='cp874')
 
     result = []
+    # ... (Logic เดิมของคุณ)
     
     for index, row in df.iterrows():
         # แปลงข้อมูลในแต่ละแถวเป็น List ของ String
